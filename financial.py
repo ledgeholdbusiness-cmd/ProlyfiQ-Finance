@@ -72,6 +72,7 @@ def send_professional_sms(to_number, message_content):
     }
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=5)
+        print(f"🔍 Hubtel RAW: {response.status_code} | {response.text}")
         return response.status_code in [200, 201]
     except Exception as e:
         print(f"❌ Hubtel Connection Exception: {str(e)}")
@@ -275,43 +276,42 @@ def paystack_webhook():
             staged = result["staged_data"]
             print(f"✅ ATOMIC BLOCK SECURED: Order {order_id} established. Transient token {session_token} deleted.")
 
-            # Dual SMS Dispatch Protocol
+            # ── Extract SMS data ──
+            buyer_phone = staged['buyer_phone']
+            seller_momo = staged['momo']
+            item_name   = staged['item_name']
+            listing_id  = staged['listing_id']
+
+            bundle_count = staged.get('bundle_units_count', 1)
+            is_bundled = staged.get('is_bundled_pack', False)
+            display_name = f"{item_name} (Pack of {bundle_count})" if (is_bundled and bundle_count > 1) else item_name
+
+            clean_buyer  = format_gh_phone(buyer_phone)
+            clean_seller = format_gh_phone(seller_momo)
+
+            # ── Fetch listing for pickup details ──
+            pickup_day = ""
+            pickup_time = ""
+            pickup_location = ""
             try:
-                buyer_phone = staged['buyer_phone']
-                seller_momo = staged['momo']
-                item_name   = staged['item_name']
-                listing_id  = staged['listing_id']
+                listing_doc = (
+                    db.collection('artifacts').document(APP_ID)
+                    .collection('public').document('data')
+                    .collection('market_listings').document(listing_id)
+                ).get()
+                if listing_doc.exists:
+                    listing_data = listing_doc.to_dict()
+                    schedule = listing_data.get('schedule', '')
+                    if schedule and '|' in schedule:
+                        parts = schedule.split('|')
+                        pickup_day = parts[0].strip() if len(parts) > 0 else ''
+                        pickup_time = parts[1].strip() if len(parts) > 1 else ''
+                    pickup_location = listing_data.get('landmark', '')
+            except Exception:
+                pass
 
-                # ── Add bundle context to item name for both parties ──
-                bundle_count = staged.get('bundle_units_count', 1)
-                is_bundled = staged.get('is_bundled_pack', False)
-                display_name = f"{item_name} (Pack of {bundle_count})" if (is_bundled and bundle_count > 1) else item_name
-
-                clean_buyer  = format_gh_phone(buyer_phone)
-                clean_seller = format_gh_phone(seller_momo)
-
-                # ── Fetch listing for pickup details ──
-                pickup_day = ""
-                pickup_time = ""
-                pickup_location = ""
-                try:
-                    listing_doc = (
-                        db.collection('artifacts').document(APP_ID)
-                          .collection('public').document('data')
-                          .collection('market_listings').document(listing_id)
-                    ).get()
-                    if listing_doc.exists:
-                        listing_data = listing_doc.to_dict()
-                        schedule = listing_data.get('schedule', '')
-                        if schedule and '|' in schedule:
-                            parts = schedule.split('|')
-                            pickup_day = parts[0].strip() if len(parts) > 0 else ''
-                            pickup_time = parts[1].strip() if len(parts) > 1 else ''
-                        pickup_location = listing_data.get('landmark', '')
-                except Exception:
-                    pass  # If listing fetch fails, just send without pickup details
-
-                # ── BUYER SMS 1: Payment confirmation (immediate) ──
+            # ── BUYER SMS ──
+            try:
                 if clean_buyer != "Unknown":
                     seller_display = f"0{clean_seller[3:]}" if clean_seller.startswith('233') else clean_seller
                     buyer_msg = (
@@ -320,11 +320,9 @@ def paystack_webhook():
                     )
                     send_professional_sms(clean_buyer, buyer_msg)
 
-                    # ── BUYER SMS 2: Pickup details (delayed 15 seconds) ──
                     if pickup_location:
                         import time
                         time.sleep(15)
-                        
                         pickup_info = (
                             f"Meetup for your {display_name} is at {pickup_location}"
                         )
@@ -337,10 +335,12 @@ def paystack_webhook():
                             f"but the time window and location are fixed for your safety. "
                             f"Ref: {order_id}"
                         )
-                        
                         send_professional_sms(clean_buyer, pickup_info)
+            except Exception as buyer_sms_err:
+                print(f"⚠️ Buyer SMS failed: {str(buyer_sms_err)}")
 
-                # ── SELLER SMS ──
+            # ── SELLER SMS ──
+            try:
                 if clean_seller not in ["Unknown", "None"]:
                     buyer_display = f"0{clean_buyer[3:]}" if clean_buyer.startswith('233') else clean_buyer
                     merchant_msg = (
@@ -349,9 +349,8 @@ def paystack_webhook():
                         f"Let them scan your QR code when you meet to claim your money."
                     )
                     send_professional_sms(clean_seller, merchant_msg)
-
-            except Exception as sms_err:
-                print(f"⚠️ Notification alert delivery execution bypassed: {str(sms_err)}")
+            except Exception as seller_sms_err:
+                print(f"⚠️ Seller SMS failed: {str(seller_sms_err)}")
 
         except Exception as e:
             print(f"❌ WEBHOOK TRANSACTION COLLISION CRASH: {str(e)}")
