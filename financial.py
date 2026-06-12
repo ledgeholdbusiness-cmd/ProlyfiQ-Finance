@@ -110,7 +110,7 @@ def send_handoff_email(order_data, paystack_ref):
         """
 
         resend.Emails.send({
-            "from": "Ledgehold System <onboarding@resend.dev>",
+            "from": "Ledgehold System <mail.dataexpress.store>",
             "to": ["ledgehold.business@gmail.com"],
             "subject": f"✅ Handoff Complete: {order_data.get('item')}",
             "html": email_body
@@ -1420,7 +1420,7 @@ def universal_email_dispatch():
 
     try:
         response = resend.Emails.send({
-            "from": "Ledgehold System <onboarding@resend.dev>",
+            "from": "Ledgehold System <mail.dataexpress.store>",
             "to": ["ledgehold.business@gmail.com"],
             "subject": subject,
             "html": html_body
