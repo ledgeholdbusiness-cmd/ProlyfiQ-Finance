@@ -22,7 +22,8 @@ limiter = Limiter(
     key_func=get_remote_address,
     app=app,
     storage_uri=redis_storage_url or "memory://",
-    default_limits=["200 per day"]
+    default_limits=["5000 per day", "200 per hour"],
+    default_limits_exempt_when=lambda: request.path == '/healthz'
 )
 
 # ── ENVIRONMENT CONFIGURATION ──
